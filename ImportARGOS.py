@@ -25,7 +25,7 @@ outputFC = "V:/ARGOSTracking/ARGOSTracking/scratch/ARGOStrack.shp"
 ## Prepare a new feature class to which we'll add tracking points
 # Create an empty feature class; requires the path and name as separate parameters
 outPath,outName = os.path.split(outputFC)
-arcpy.CreateFeatureclass_management(outPath,outName,"POINT","","","",outputSR)
+arcpy.management.CreateFeatureclass(outPath,outName,"POINT","","","",outputSR)
 
 # Add TagID, LC, IQ, and Date fields to the output feature class
 arcpy.AddField_management(outputFC,"TagID","LONG")
@@ -33,11 +33,16 @@ arcpy.AddField_management(outputFC,"LC","TEXT")
 arcpy.AddField_management(outputFC,"Date","DATE")
 
 #%% Construct a while loop to iterate through all lines in the datafile
-# Open the ARGOS data file for reading
-inputFileObj = open(inputFile,'r')
+# Read Folder
+inputFolder = arcpy.GetParameterAsText(0)
+outputSR = arcpy.GetParameterAsText(1)
+outputFC = arcpy.GetParameterAsText(2)
+
+
+inputFiles = os.listdir(inputFolder)
 
 # Get the first line of data, so we can use a while loop
-lineString = inputFileObj.readline()
+lineString = inputFiles.readline()
 
 lineData = lineString.split()
 headerLineString = lineData[0]
@@ -45,6 +50,8 @@ headerLineString = lineData[0]
         #Print the contents of the headerLine
 print(headerLineString)
         
+# Create the insert cursor
+cur = arcpy.da.InsertCursor(outputFC,['Shape@','TagID','LC','Date'])
 
 # Start the while loop
 while lineString:
@@ -57,12 +64,9 @@ while lineString:
         
         # Extract attributes from the datum header line
         tagID = lineData[0]
-        date = lineData[3]
-        time = lineData[4]
-        LocationClass = lineData[7]
         
         # Extract location info from the next line
-        line2String = inputFileObj.readline()
+        line2String = inputFiles.readline()
         
         # Parse the line into a list
         line2Data = line2String.split()
@@ -71,17 +75,42 @@ while lineString:
         obsLat = line2Data[2]
         obsLon= line2Data[5]
         
-        # Construct a point object from the feature class
-        obsPoint = arcpy.Point()
-        obsPoint.X = obsLon
-        obsPoint.Y = obsLat
+        date = lineData[3]
+        time = lineData[4]
+        LocationClass = lineData[7]
         
-        # Print results to see how we're doing
-        print (tagID,"Lat:"+obsLat,"Long:"+obsLon, "Date: "+date, "Location Class: "+LocationClass, "time: "+time)
+        # #Try to convert coordinates to point object
+        try:
+            # Convert raw coordinate strings to numbers
+            if obsLat[-1] == 'N':
+                obsLat = float(obsLat[:-1])
+            else:
+                obsLat = float(obsLat[:-1]) * -1
+            if obsLon[-1] == 'E':
+                obsLon = float(obsLon[:-1])
+            else:
+                obsLon = float(obsLon[:-1]) * -1
+                
+            
+            # Create point object from lat/long coordinates
+            obsPoint = arcpy.Point()
+            obsPoint.X = obsLon
+            obsPoint.Y = obsLat
+            # Convert the point to a point geometry object with spatial reference
+            inputSR = arcpy.SpatialReference(4326)
+            obsPointGeom = arcpy.PointGeometry(obsPoint,inputSR)
+            
+            feature =cur.insertRow((obsPointGeom,tagID,LocationClass,date.replace(".","/") + " " + time)) 
+        #Handle any error
+        except Exception as e:
+            arcpy.AddWarning(f"Error adding record {tagID} to the output: {e}")
         
-    # Move to the next line so the while loop progresses
-    lineString = inputFileObj.readline()
-    
+    # Create a feature object
+        
+        # Move to the next line so the while loop progresses
+    lineString = inputFiles.readline()
+  #Delete the cursor object
+del cur  
 #Close the file object
-inputFileObj.close()
+inputFiles.close()
 
